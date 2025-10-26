@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Acompanhe os seus estudos!</title>
+  <style>
+    :root{--bg:#0f1724;--card:#111827;--muted:#94a3b8;--accent:#60a5fa;--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;color:#e6eef8;background:linear-gradient(180deg,#071024 0%,#07182b 100%);}
+    .wrap{max-width:1100px;margin:28px auto;padding:20px;display:grid;grid-template-columns:1fr 420px;gap:18px}
+    .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(2,6,23,0.6);}
+    header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+    h1{font-size:18px;margin:0}
+    small{color:var(--muted)}
+
+    /* design da coluna na esquerda */
+    .subjects{display:flex;flex-direction:column;gap:12px}
+    .subject-row{display:flex;align-items:center;gap:10px}
+    .subject-btn{flex:1;background:var(--glass);border:1px solid rgba(255,255,255,0.03);padding:10px;border-radius:8px;color:#e6eef8;text-align:left;display:flex;align-items:center;gap:10px}
+    .subject-btn.active{outline:2px solid rgba(96,165,250,0.2);}
+    .swatch{width:14px;height:14px;border-radius:4px;box-shadow:0 1px 0 rgba(0,0,0,0.6);flex:0 0 auto}
+    .controls{display:flex;gap:8px}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;color:#e6eef8;cursor:pointer}
+    button.primary{background:linear-gradient(90deg,var(--accent),#3b82f6);border:none}
+    .timer{font-family:monospace;font-size:28px}
+
+    /* design da coluna na direita */
+    .charts{display:flex;flex-direction:column;gap:12px}
+    canvas{background:transparent;border-radius:8px;padding:8px}
+
+    /* área de anotações */
+    textarea{width:100%;min-height:120px;background:#0b1220;border-radius:8px;border:1px solid rgba(255,255,255,0.03);padding:10px;color:#e6eef8}
+
+    /* responsividade */
+    @media (max-width:980px){.wrap{grid-template-columns:1fr;}.charts{order:3}}
+
+    .meta{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:8px;align-items:center}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>StudyTimer</h1>
+        <small>Foco diário e visualização semanal — salvamento automático e localmente</small>
+      </div>
+    </header>
+
+    <section class="card" aria-labelledby="subjects-heading">
+      <h2 id="subjects-heading">Matérias</h2>
+      <div style="height:12px"></div>
+
+      <div class="subjects" id="subjectsList"></div>
+
+      <div style="height:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <input id="newSubjectName" placeholder="Nova matéria" style="flex:1;padding:8px;border-radius:8px;background:#06111b;border:1px solid rgba(255,255,255,0.03);color:#e6eef8"/>
+        <input type="color" id="newSubjectColor" title="Cor da matéria" value="#60a5fa" style="width:48px;height:40px;border-radius:8px;border:none;padding:4px;"/>
+        <button id="addSubject">Adicionar</button>
+      </div>
+
+      <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)"/>
+
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <div class="timer" id="timerDisplay">00:00:00</div>
+          <div class="meta">Tempo total (todas as matérias): <span id="totalAll">00:00:00</span></div>
+        </div>
+        <div class="controls">
+          <button id="startStop" class="primary">Start</button>
+          <button id="resetTimer">Reset</button>
+        </div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <label for="notesArea" class="meta">Anotações da matéria selecionada</label>
+      <textarea id="notesArea" aria-label="Anotações"></textarea>
+
+      <div style="height:12px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="exportData">Exportar JSON</button>
+        <button id="importData">Importar</button>
+        <input type="file" id="fileInput" accept="application/json" style="display:none"/>
+      </div>
+    </section>
+
+    <aside class="card charts">
+      <div>
+        <h3>Horas — últimos 7 dias</h3>
+        <canvas id="barChart" aria-label="Gráfico de barras - últimas 7 dias"></canvas>
+      </div>
+      <div>
+        <h3>Distribuição por matéria</h3>
+        <canvas id="pieChart" aria-label="Gráfico de pizza - distribuição por matéria"></canvas>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Bibliotecas via CDN para protótipo -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+ ,021
+  <script>
+  // Modelo de dados
+  const STORAGE_KEY = 'study.timer.v1';
+
+  function uuid(){return Math.random().toString(36).slice(2,9)}
+
+  function randomColorHex(){
+    // paleta de cores
+    const h = Math.floor(Math.random()*360);
+    const s = 65 + Math.floor(Math.random()*10); // 65-75
+    const l = 50;
+    return hslToHex(h,s,l);
+  }
+  function hslToHex(h,s,l){
+    s/=100; l/=100;
+    const k = n => (n + h/30) % 12;
+    const a = s * Math.min(l, 1-l);
+    const f = n => Math.round(255*(l - a*Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n),1)) )));
+    return `#${f(0).toString(16).padStart(2,'0')}${f(8).toString(16).padStart(2,'0')}${f(4).toString(16).padStart(2,'0')}`;
+  }
+
+  const defaultState = {
+    subjects: [
+      {id: 'math', name:'Matemática', notes:'', totalSeconds:0, sessions:[], color:'#60a5fa'},
+      {id: 'port', name:'Português', notes:'', totalSeconds:0, sessions:[], color:'#f97316'}
+    ],
+    activeSubjectId: null,
+    runningSession: null 
+  }
+
+  let state = loadState();
+
+  // fixamento de cores
+  function ensureColors(){
+    state.subjects.forEach(s=>{ if(!s.color) s.color = randomColorHex(); })
+  }
+  ensureColors();
+
+  //  salvamento automático
+  function saveState(){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+  // carregar dados
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return JSON.parse(JSON.stringify(defaultState));
+      const parsed = JSON.parse(raw);
+      return parsed;
+    }catch(e){
+      console.error('Falha ao carregar estado',e);
+      return JSON.parse(JSON.stringify(defaultState));
+    }
+  }
+
+  // autosalvar
+  window.addEventListener('beforeunload', ()=> saveState());
+
+  // UI
+  const subjectsList = document.getElementById('subjectsList');
+  const newSubjectName = document.getElementById('newSubjectName');
+  const newSubjectColor = document.getElementById('newSubjectColor');
+  const addSubjectBtn = document.getElementById('addSubject');
+  const timerDisplay = document.getElementById('timerDisplay');
+  const totalAll = document.getElementById('totalAll');
+  const startStopBtn = document.getElementById('startStop');
+  const resetTimerBtn = document.getElementById('resetTimer');
+  const notesArea = document.getElementById('notesArea');
+  const exportBtn = document.getElementById('exportData');
+  const importBtn = document.getElementById('importData');
+  const fileInput = document.getElementById('fileInput');
+  const barCtx = document.getElementById('barChart').getContext('2d');
+  const pieCtx = document.getElementById('pieChart').getContext('2d');
+  let barChart, pieChart;
+
+  function secToHHMMSS(s){
+    s = Math.floor(s);
+    const h = Math.floor(s/3600); s%=3600;
+    const m = Math.floor(s/60); const sec = s%60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+  }
+
+  function getActiveSubject(){
+    return state.subjects.find(x=>x.id===state.activeSubjectId) || state.subjects[0] || null;
+  }
+
+  function setActiveSubject(id){
+    state.activeSubjectId = id;
+    saveState();
+    renderSubjects();
+    renderNotes();
+    updateCharts();
+  }
+
+  // UI
+  function renderSubjects(){
+    subjectsList.innerHTML='';
+    state.subjects.forEach(s=>{
+      const row = document.createElement('div'); row.className='subject-row';
+      const btn = document.createElement('button'); btn.className='subject-btn';
+      // troca + texto
+      const sw = document.createElement('span'); sw.className='swatch'; sw.style.background = s.color || '#888';
+      const txt = document.createElement('div'); txt.style.flex='1'; txt.textContent = `${s.name} — ${secToHHMMSS(s.totalSeconds||0)}`;
+      btn.appendChild(sw); btn.appendChild(txt);
+      if(state.activeSubjectId===s.id) btn.classList.add('active');
+      btn.addEventListener('click', ()=> setActiveSubject(s.id));
+      row.appendChild(btn);
+      const del = document.createElement('button'); del.textContent='✖'; del.title='Remover matéria'; del.addEventListener('click', (ev)=>{ev.stopPropagation(); removeSubject(s.id)});
+      // edição de cores
+      const editColor = document.createElement('input'); editColor.type='color'; editColor.value = s.color || '#888'; editColor.title = 'Editar cor da matéria'; editColor.style.width='40px'; editColor.style.height='36px'; editColor.style.border='none'; editColor.addEventListener('input', (ev)=>{ s.color = ev.target.value; saveState(); renderSubjects(); updateCharts(); });
+      row.appendChild(editColor);
+      row.appendChild(del);
+      subjectsList.appendChild(row);
+    })
+  }
+
+    // adicionar novas matérias
+  function addSubject(name, color){
+    if(!name || !name.trim()) return;
+    const id = uuid();
+    const chosenColor = color || randomColorHex();
+    state.subjects.push({id,name:name.trim(),notes:'',totalSeconds:0,sessions:[], color: chosenColor});
+    setActiveSubject(id);
+    saveState();
+    renderSubjects();
+    updateCharts();
+  }
+  // remover matérias
+  function removeSubject(id){
+    state.subjects = state.subjects.filter(s=>s.id!==id);
+    if(state.activeSubjectId===id) state.activeSubjectId = state.subjects[0]?.id || null;
+    saveState();
+    renderSubjects(); renderNotes(); updateCharts();
+  }
+
+  addSubjectBtn.addEventListener('click', ()=>{addSubject(newSubjectName.value, newSubjectColor.value); newSubjectName.value='';});
+  newSubjectName.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){addSubject(newSubjectName.value, newSubjectColor.value); newSubjectName.value='';}});
+
+  // cronômetro
+  let tickInterval = null; 
+
+  function startTimer(){
+    const subj = getActiveSubject(); if(!subj) return alert('Crie e selecione uma matéria primeiro');
+    if(state.runningSession) return;
+    state.runningSession = {subjectId: subj.id, startTs: Date.now()};
+    saveState();
+    startTick();
+    renderControls();
+  }
+
+  function stopTimer(){
+    if(!state.runningSession) return;
+    const rs = state.runningSession;
+    const endTs = Date.now();
+    const elapsedSec = Math.round((endTs - rs.startTs)/1000);
+    const subj = state.subjects.find(x=>x.id===rs.subjectId);
+    if(subj){
+      subj.totalSeconds = (subj.totalSeconds||0) + elapsedSec;
+      subj.sessions = subj.sessions || [];
+      subj.sessions.push({start: rs.startTs, end: endTs});
+    }
+    state.runningSession = null;
+    saveState();
+    stopTick();
+    renderSubjects(); renderControls(); renderNotes(); updateCharts();
+  }
+  // resetar o cronômetro
+  function resetRunning(){
+    if(confirm('Redefinir o timer em execução e descartar progresso não salvo?')){
+      state.runningSession = null; saveState(); stopTick(); renderControls(); updateCharts();
+    }
+  }
+
+  function startTick(){
+    if(tickInterval) return;
+    tickInterval = setInterval(()=>{
+      renderTimer();
+    }, 1000)
+  }
+  function stopTick(){ if(tickInterval){clearInterval(tickInterval);tickInterval=null} }
+
+  startStopBtn.addEventListener('click', ()=>{
+    if(state.runningSession) stopTimer(); else startTimer();
+  })
+  resetTimerBtn.addEventListener('click', ()=> resetRunning());
+
+  // anotações
+  function renderNotes(){
+    const subj = getActiveSubject();
+    notesArea.value = subj?.notes || '';
+  }
+  notesArea.addEventListener('input', ()=>{
+    const subj = getActiveSubject(); if(!subj) return;
+    subj.notes = notesArea.value; saveState();
+  })
+
+  // mostra dias atuais e anteriores, mês e ano
+  function computeLast7DaysTotals(){
+    const days = Array.from({length:7}, (_,i)=>{
+      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (6 - i));
+      return d;
+    });
+    const totals = days.map(()=>0);
+    state.subjects.forEach(s=>{
+      (s.sessions||[]).forEach(sess=>{
+        const start = new Date(sess.start); const end = new Date(sess.end);
+        
+        for(let i=0;i<7;i++){
+          const dayStart = new Date(days[i]);
+          const dayEnd = new Date(dayStart); dayEnd.setHours(23,59,59,999);
+          const overlapStart = Math.max(start, dayStart);
+          const overlapEnd = Math.min(end, dayEnd);
+          
+          if(overlapEnd > overlapStart){
+            totals[i] += Math.round((overlapEnd - overlapStart)/1000);
+          }
+        }
+      })
+    })
+    return totals;
+  }
+
+  function computeTotalPerSubject(){
+    return state.subjects.map(s=> ({name:s.name, seconds: s.totalSeconds||0, color: s.color || randomColorHex()}))
+  }
+  // gráficos em barra
+  function updateCharts(){
+    const totals = computeLast7DaysTotals();
+    const labels = Array.from({length:7},(_,i)=>{
+      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (6 - i));
+      return d.toLocaleDateString();
+    })
+
+    const hours = totals.map(s=> +(s/3600).toFixed(2));
+
+    if(!barChart){
+      barChart = new Chart(barCtx,{
+        type:'bar',data:{labels, datasets:[{label:'Horas', data:hours}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{enabled:true}}}
+      })
+    } else {
+      barChart.data.labels = labels; barChart.data.datasets[0].data = hours; barChart.update();
+    }
+
+    const per = computeTotalPerSubject();
+    const pLabels = per.map(x=>x.name);
+    const pData = per.map(x=> +(x.seconds/3600).toFixed(2));
+    const pColors = per.map(x=> x.color);
+    
+    if(!pieChart){
+      pieChart = new Chart(pieCtx,{type:'pie',data:{labels:pLabels,datasets:[{data:pData, backgroundColor: pColors}]},options:{responsive:true}})
+    }
+    else {
+      pieChart.data.labels = pLabels; pieChart.data.datasets[0].data = pData; pieChart.data.datasets[0].backgroundColor = pColors; pieChart.update();
+    }
+
+    const totalSecondsAll = state.subjects.reduce((acc,s)=>acc + (s.totalSeconds||0),0) + (state.runningSession ? Math.round((Date.now() - state.runningSession.startTs)/1000) : 0);
+    totalAll.textContent = secToHHMMSS(totalSecondsAll);
+  }
+
+  // gráfico pizza
+  function renderControls(){
+    if(state.runningSession){
+      startStopBtn.textContent='Stop'; startStopBtn.classList.add('primary');
+    } else {
+      startStopBtn.textContent='Start'; startStopBtn.classList.remove('primary');
+      timerDisplay.textContent = '00:00:00';
+    }
+    renderSubjects();
+    renderNotes();
+    updateCharts();
+  }
+
+  function renderTimer(){
+    if(state.runningSession){
+      const elapsed = Math.round((Date.now() - state.runningSession.startTs)/1000);
+      timerDisplay.textContent = secToHHMMSS(elapsed);
+    } else {
+      timerDisplay.textContent = '00:00:00';
+    }
+    // atualizar tempo total
+    updateCharts();
+  }
+
+  // importar e exportar
+  exportBtn.addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'study-timer.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  })
+  importBtn.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', async (e)=>{
+    const f = e.target.files[0]; if(!f) return; const txt = await f.text(); try{ const parsed = JSON.parse(txt); state = parsed; ensureColors(); saveState(); renderControls(); alert('Importado com sucesso'); }catch(err){alert('Arquivo inválido')}
+  })
+
+  if(!state.activeSubjectId && state.subjects.length) state.activeSubjectId = state.subjects[0].id;
+  renderControls();
+
+  // iniciar e carregar os dados anteriores
+  if(state.runningSession) startTick();
+
+  // autosalvar a cada 5 segundos
+  setInterval(()=> saveState(), 5000);
+  </script>
+</body>
+</html>
